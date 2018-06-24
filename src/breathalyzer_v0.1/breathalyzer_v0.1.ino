@@ -40,6 +40,8 @@
 
 #define I2C_ADDR      0x3C
 
+#define OLED_REFRESH  500
+
 
 static const unsigned char PROGMEM banana_right[] =
 {
@@ -66,6 +68,11 @@ Adafruit_SSD1306 display(OLED_RESET);
 bool reading = false;
 bool usr_btn = false;
 
+// will store last time OLED was updated
+unsigned long previousMillis = 0;        
+
+bool bananaIsRight = true;
+
 void setup() {
   Serial.begin(9600);
   pinMode(USR_BTN1, INPUT_PULLUP);
@@ -75,13 +82,8 @@ void setup() {
 
   // initialize with the I2C addr 0x3D (for the 128x64)
   display.begin(SSD1306_SWITCHCAPVCC, I2C_ADDR);  
-
-  //display.invertDisplay(true);
   
   display.clearDisplay(); 
-  // draw a white circle, 10 pixel radius
-  //display.fillCircle(display.width()/2, display.height()/2, 10, WHITE);
-  //display.display();
 
   // miniature bitmap display
   display.drawBitmap(0, 0,  banana_right, 128, 64, 1);
@@ -90,32 +92,25 @@ void setup() {
 
 void loop() {
 
+  unsigned long currentMillis;
+  
   // Check input 
   if(!digitalRead(USR_BTN1)){
     usr_btn = true;
     Serial.println("BTN");
-    digitalWrite(LED1, HIGH);
+    digitalWrite(LED1, HIGH); 
     digitalWrite(BUZZER, HIGH);
-
-    display.clearDisplay();
-    // miniature bitmap display
-    display.drawBitmap(0, 0,  banana_left, 128, 64, 1);
-    display.display(); 
   }
   else{
-    digitalWrite(BUZZER, LOW);
+    usr_btn = false;
     digitalWrite(LED1, LOW);
-
-    display.clearDisplay();
-    // miniature bitmap display
-    display.drawBitmap(0, 0,  banana_right, 128, 64, 1);
-    display.display(); 
+    digitalWrite(BUZZER, LOW);
   }
   
   
   // Update states 
   switch(breath_state){
-    case WAITING:
+    case WAITING:   
       if(usr_btn){
         breath_state = READING;
       }
@@ -136,36 +131,64 @@ void loop() {
     default:
       break;
   }
+
+  //Check time
+  if(breath_state == WAITING){
+    currentMillis = millis();
+  }
   
-  // Check if states has changed 
-  if(breath_state != breath_state_old){
-    // Update the old state
+  
+  // Check if states has changed or if timer is out
+  if(breath_state != breath_state_old || currentMillis - previousMillis >= OLED_REFRESH){
+    // Update the old state 
     breath_state_old = breath_state;
+    // Update the timer
+    previousMillis = currentMillis;
     
     // Command outputs
     switch(breath_state){
       case WAITING:
-        if(usr_btn){
-          breath_state = READING;
+        Serial.println("WAITING");
+
+        if(bananaIsRight){
+          bananaIsRight = false;
+          display.clearDisplay();
+          display.drawBitmap(0, 0,  banana_left, 128, 64, 1);
+          display.display();
         }
+        else{
+          bananaIsRight = true;
+          display.clearDisplay();
+          display.drawBitmap(0, 0,  banana_right, 128, 64, 1);
+          display.display(); 
+        }     
+        
         break;
   
       case READING:
-        if(reading == false){
-          breath_state = DISPLAYING;
-        }
+        Serial.println("READING");
+        reading = true;
+        ReadSensor();
         break;
   
       case DISPLAYING:
-        if(usr_btn){
-          breath_state = READING;
-        }
+        Serial.println("DISPLAYING");
+        display.clearDisplay();
+        display.setTextSize(1);
+        display.setTextColor(WHITE);
+        display.setCursor(0,0);
+        display.println("Result : BOURRE");
         break;
   
       default:
         break;
     }  
   }
+}
+
+void ReadSensor(){
+  delay(1500);
+  reading = false;
 }
 
 /*
