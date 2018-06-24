@@ -26,23 +26,29 @@
 // OLED driver
 #include <Adafruit_SSD1306.h>
 
-#define USR_BTN1      3
-#define LED1          2
-#define BUZZER        4
-#define D_MQ3         X
-#define A_MQ3         A7
-#define TEMP_SENS     X
+#define USR_BTN1                  3
+#define LED1                      9
+#define BUZZER                    4
+#define D_MQ3                     X
+#define A_MQ3                     A7
+#define TEMP_SENS                 X
 
-#define OLED_RESET    5
+#define OLED_RESET                5
 
-#define SDA           A4
-#define SCL           A5
+#define SDA                       A4
+#define SCL                       A5
 
-#define I2C_ADDR      0x3C
+#define I2C_ADDR                  0x3C
 
-#define OLED_REFRESH  500
+#define OLED_REFRESH              500
 
-#define MQ3_MINSENTIVITY_VOLTAGE 2.5
+#define READING_DURATION          3000
+
+#define NUMBER_OF_READINGS        1500
+
+#define MSG_MAX_LENGTH_SIZE_2     11
+
+#define MQ3_MINSENTIVITY_VOLTAGE  2.5
 
 #define ORDER2CONVERSION(x) 189.6643023*x*x-1031.588101*x+1424.9366
 #define ORDER3CONVERSION(x) 230.1310332*x*x*x-2053.119259*x*x+6056.723285*x-5794.647575
@@ -74,7 +80,15 @@ bool reading = false;
 bool usr_btn = false;
 
 // will store last time OLED was updated
-unsigned long previousMillis = 0;        
+unsigned long previousMillis = 0; 
+
+// will store last time we started readingSensor
+unsigned long startReading = 0; 
+
+float MQ3Voltage;
+double alcohol;
+
+bool hasValueToDisplay = false;
 
 bool bananaIsRight = true;
 
@@ -91,23 +105,6 @@ void setup() {
 }
 
 void loop() {
-
-  /* TODO*/
-  float MQ3Voltage;
-  double alcohol;
-
-  MQ3Voltage = getMQ3Voltage( 100);
-
-  Serial.print("\r\nMQ3Voltage:");
-  Serial.print(MQ3Voltage);
-  
-  if( getAlcohol( MQ3Voltage, &alcohol, 4)) {
-    Serial.print("    Alcohol:");
-    Serial.print(alcohol);
-    Serial.print("mg/L");  
-  }
-  /* end of TODO*/
-
   unsigned long currentMillis;
   
   // Check input 
@@ -115,12 +112,10 @@ void loop() {
     usr_btn = true;
     Serial.println("BTN");
     digitalWrite(LED1, HIGH); 
-    digitalWrite(BUZZER, HIGH);
   }
   else{
     usr_btn = false;
     digitalWrite(LED1, LOW);
-    digitalWrite(BUZZER, LOW);
   } 
   
   // Update states 
@@ -163,37 +158,36 @@ void loop() {
     switch(breath_state){
       case WAITING:
         Serial.println("WAITING");
-
         if(bananaIsRight){
           bananaIsRight = false;
-          display.clearDisplay();
-          display.drawBitmap(0, 0,  banana_left, 128, 64, 1);
-          display.display();
+          drawBanana("left");
         }
         else{
           bananaIsRight = true;
-          display.clearDisplay();
-          display.drawBitmap(0, 0,  banana_right, 128, 64, 1);
-          display.display(); 
+          drawBanana("right");
         }     
-        
         break;
   
       case READING:
         Serial.println("READING");
+        writeOLED("Reading...", 0, true);
         reading = true;
-        ReadSensor();
+        delay(1000);
+        startReading = millis();
+        hasValueToDisplay = readSensor(READING_DURATION, NUMBER_OF_READINGS);
         break;
   
       case DISPLAYING:
         Serial.println("DISPLAYING");
-        display.clearDisplay();
-        display.setTextSize(2);
-        display.setTextColor(WHITE);
-        display.setCursor(0,0);
-        display.println("Result :");
-        display.println("BOURRE");
-        display.display();
+        if(hasValueToDisplay){
+          writeOLED("Result :", 0, true);
+          writeOLED(String(alcohol, 4) + "mg/L", 1, false);
+        }
+        else{
+          writeOLED("Too low !", 0, true);
+          writeOLED("Press to", 1, false);
+          writeOLED("Measure", 2, false);
+        }
         break;
   
       default:
@@ -202,12 +196,83 @@ void loop() {
   }
 }
 
-void ReadSensor(){
-  delay(1500);
-  reading = false;
+void readSensorVoltage(){
+  MQ3Voltage = getMQ3Voltage(READING_DURATION, NUMBER_OF_READINGS);
+  Serial.print("\r\nMQ3Voltage:");
+  Serial.print(MQ3Voltage);
 }
 
-void DrawBanana(String direction){
+/*
+ * @fn      bool readSensor(int reading_duration, int number_of_readings)
+ * @brief   Read the MQ-3 sensor for a certain period and number of measures
+ * 
+ * @details Read the MQ-3 sensor for a certain period and number of measures
+ * 
+ * @warning number_of_readings must be lower or equal to reading_duration
+ * 
+ * @param   reading_duration duration in milliseconds (int)
+ * @param   number_of_readings number of readings (int)
+ * @return  a boolean if there's something to display
+ */
+bool readSensor(int reading_duration, int number_of_readings){
+  bool hasToDisplay;
+  
+  MQ3Voltage = getMQ3Voltage(reading_duration, number_of_readings);
+  if(getAlcohol(MQ3Voltage, &alcohol, 4)){
+    Serial.print("  Alcohol:");
+    Serial.print(alcohol);
+    Serial.println("mg/L");  
+    hasToDisplay = true;   
+  }
+  else{
+    hasToDisplay = false;
+  }
+  Serial.print("\r\nMQ3Voltage:");
+  Serial.print(MQ3Voltage);
+  buzz(4, 150);
+  reading = false;
+
+  return hasToDisplay;
+}
+
+/*
+ * @fn      void writeOLED(String msg, int line, bool clean)
+ * @brief   Write the message to the OLED screen
+ * 
+ * @details Write the string contained in msg to the corresponding line, clearing or not the screen beforehand
+ * 
+ * @warning Line must be between 0 and 2 and msg <= 11 char
+ * 
+ * @param   msg Message to write (String)
+ * @param   line Line to write (int)
+ * @param   clean Clean the screen before writing (bool)
+ * @return  void
+ */
+void writeOLED(String msg, int line, bool clean){
+  if(clean){
+    display.clearDisplay();
+  }
+  display.setTextSize(2);
+  display.setTextColor(WHITE);
+  display.setCursor(0,line * (64/3));
+  if(msg.length() <= MSG_MAX_LENGTH_SIZE_2){
+    display.println(msg);
+  }
+  display.display();
+}
+
+/*
+ * @fn      void drawBanana(String direction)
+ * @brief   Draw a banana facing the direction passed in parameter
+ * 
+ * @details direction = "right", facing right, direction = "left", facing left
+ * 
+ * @warning only "right" of "left"
+ * 
+ * @param   direction Direction the banana is facing
+ * @return  void
+ */
+void drawBanana(String direction){
   if(direction.equals("right")){
     display.clearDisplay();
     display.drawBitmap(0, 0,  banana_right, 128, 64, 1);
@@ -221,31 +286,25 @@ void DrawBanana(String direction){
 }
 
 /*
-void functionnalities(){
-  // Show image buffer on the display hardware.
-  display.display();
-
-  // Clear the buffer.
-  display.clearDisplay();
-
-  // draw a single pixel
-  display.drawPixel(10, 10, WHITE);
-
-  // draw a white circle, 10 pixel radius
-  display.fillCircle(display.width()/2, display.height()/2, 10, WHITE);
-  display.display();
-  
-  // text display tests
-  display.setTextSize(1);
-  display.setTextColor(WHITE);
-  display.setCursor(0,0);
-  display.println("Hello, world!");
-
-   // miniature bitmap display
-  display.drawBitmap(30, 16,  logo16_glcd_bmp, 16, 16, 1);
-  display.display();
+ * @fn      void buzz(int nb_of_bips, int delay_between_bips)
+ * @brief   Make a buzzer noise
+ * 
+ * @details nb_of_bips for the number of sounds to produce, delay_between_bips for the delay between those sounds
+ * 
+ * @warning delay_between_bips will block the program
+ * 
+ * @param   nb_of_bips number of bips to produce (int)
+ * @param   delay_between_bips delay between the bips (milliseconds)
+ * @return  void
+ */
+void buzz(int nb_of_bips, int delay_between_bips){
+  for(int i = 0; i < nb_of_bips; i++){
+    digitalWrite(BUZZER, HIGH);
+    delay(delay_between_bips);
+    digitalWrite(BUZZER, LOW);
+    delay(delay_between_bips); 
+  }
 }
-*/
 
 /*
  * @fn    float getMQ3Voltage( int numberOfMeasures)
@@ -254,18 +313,25 @@ void functionnalities(){
  * @param numberOfMeasures The length of measurements series
  * @return Voltage read
  */
-float getMQ3Voltage( int numberOfMeasures) {
- 
-  uint16_t adc_MQ;
+float getMQ3Voltage(int durationOfMeasures, int nbOfMeasures) {
+  unsigned long currentReading = millis();
+  uint32_t adc_MQ = 0;
+  uint32_t nbMeasured = 0;
 
-  /* loop for measurement */
-  for( int i=0; i<numberOfMeasures; i++) {
-    adc_MQ += analogRead(A7); 
+  // Ensure we do at best 1 measure/ms
+  if(nbOfMeasures > durationOfMeasures){
+    nbOfMeasures = durationOfMeasures;
   }
-
+  
+  /* loop for measurement */
+  while(currentReading - startReading <= durationOfMeasures){
+    adc_MQ += analogRead(A7); 
+    nbMeasured++;
+    currentReading = millis();
+    delay(durationOfMeasures/nbOfMeasures);
+  } 
   /* Average of the measures */
-  adc_MQ = adc_MQ/numberOfMeasures;
-
+  adc_MQ = adc_MQ/nbMeasured;
   /* conversion */
   return adc_MQ*(5.0/1023.0);
 }
@@ -310,3 +376,4 @@ boolean getAlcohol( float voltage, double *alcohol, int order) {
   }
   
 }
+
