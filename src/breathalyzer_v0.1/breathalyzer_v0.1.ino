@@ -42,11 +42,6 @@
 
 #define OLED_REFRESH  500
 
-#define MQ3_MINSENTIVITY_VOLTAGE 2.5
-
-#define ORDER2CONVERSION(x) 189.6643023*x*x-1031.588101*x+1424.9366
-#define ORDER3CONVERSION(x) 230.1310332*x*x*x-2053.119259*x*x+6056.723285*x-5794.647575
-#define ORDER4CONVERSION(x) 192.0543743*x*x*x*x-2314.144242*x*x*x+10374.40878*x*x-20406.38971*x+14876.27983
 
 static const unsigned char PROGMEM banana_right[] =
 {
@@ -80,40 +75,18 @@ bool bananaIsRight = true;
 
 void setup() {
   Serial.begin(9600);
-
   pinMode(USR_BTN1, INPUT_PULLUP);
   pinMode(A_MQ3, INPUT);
   pinMode(LED1, OUTPUT);
   pinMode(BUZZER, OUTPUT);
-  
+
   // initialize with the I2C addr 0x3D (for the 128x64)
   display.begin(SSD1306_SWITCHCAPVCC, I2C_ADDR);  
-  
-  display.clearDisplay(); 
-
-  // miniature bitmap display
-  display.drawBitmap(0, 0,  banana_right, 128, 64, 1);
-  display.display();  
+  delay(100);
 }
 
 void loop() {
 
-  /* TODO*/
-  float MQ3Voltage;
-  double alcohol;
-
-  MQ3Voltage = getMQ3Voltage( 100);
-
-  Serial.print("\r\nMQ3Voltage:");
-  Serial.print(MQ3Voltage);
-  
-  if( getAlcohol( MQ3Voltage, &alcohol, 4)) {
-    Serial.print("    Alcohol:");
-    Serial.print(alcohol);
-    Serial.print("mg/L");  
-  }
-  /* end of TODO*/
-  
   unsigned long currentMillis;
   
   // Check input 
@@ -127,8 +100,7 @@ void loop() {
     usr_btn = false;
     digitalWrite(LED1, LOW);
     digitalWrite(BUZZER, LOW);
-  }
-  
+  } 
   
   // Update states 
   switch(breath_state){
@@ -158,7 +130,6 @@ void loop() {
   if(breath_state == WAITING){
     currentMillis = millis();
   }
-  
   
   // Check if states has changed or if timer is out
   if(breath_state != breath_state_old || currentMillis - previousMillis >= OLED_REFRESH){
@@ -196,10 +167,12 @@ void loop() {
       case DISPLAYING:
         Serial.println("DISPLAYING");
         display.clearDisplay();
-        display.setTextSize(1);
+        display.setTextSize(2);
         display.setTextColor(WHITE);
         display.setCursor(0,0);
-        display.println("Result : BOURRE");
+        display.println("Result :");
+        display.println("BOURRE");
+        display.display();
         break;
   
       default:
@@ -211,6 +184,19 @@ void loop() {
 void ReadSensor(){
   delay(1500);
   reading = false;
+}
+
+void DrawBanana(String direction){
+  if(direction.equals("right"){
+    display.clearDisplay();
+    display.drawBitmap(0, 0,  banana_right, 128, 64, 1);
+    display.display();
+  }
+  else{
+    display.clearDisplay();
+    display.drawBitmap(0, 0,  banana_left, 128, 64, 1);
+    display.display();
+  }
 }
 
 /*
@@ -238,67 +224,5 @@ void functionnalities(){
   display.drawBitmap(30, 16,  logo16_glcd_bmp, 16, 16, 1);
   display.display();
 }
-  
-/*
- * @fn    float getMQ3Voltage( int numberOfMeasures)
- * @brief Get the Average of measurements series
- * 
- * @param numberOfMeasures The length of measurements series
- * @return Voltage read
- */
-float getMQ3Voltage( int numberOfMeasures) {
- 
-  uint16_t adc_MQ;
+*/
 
-  /* loop for measurement */
-  for( int i=0; i<numberOfMeasures; i++) {
-    adc_MQ += analogRead(A7); 
-  }
-
-  /* Average of the measures */
-  adc_MQ = adc_MQ/numberOfMeasures;
-
-  /* conversion */
-  return adc_MQ*(5.0/1023.0);
-}
-
-/*
- * @fn      boolean getAlcohol( float voltage, double *alcohol, int order)
- * @brief   Get the Alcohol level after conversion
- * 
- * @details The fuction returns false if the conversion can't be calculate.
- * 
- * @warning Conversion order must be in between 2 and 4
- * 
- * @param   voltage Analog voltage measure
- * @param   alcohol Alchol level
- * @param   order   Conversion order
- * @return  Conversion state
- *          <br/>true : conversion done
- *          <br/>false : conversion did not calculated
- */
-boolean getAlcohol( float voltage, double *alcohol, int order) {
-
-  if( voltage<MQ3_MINSENTIVITY_VOLTAGE) {
-    return false;
-  }
-
-  switch( order) {
-    case 2:
-      *alcohol = ORDER2CONVERSION( voltage);
-      return true;
-    break;
-    case 3:    
-      *alcohol = ORDER3CONVERSION( voltage);
-      return true;
-    break;
-    case 4:
-      *alcohol = ORDER4CONVERSION( voltage);
-      return true;
-    break;
-    default :
-      return false;
-    break;
-  }
-  
-}
